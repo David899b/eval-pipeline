@@ -1,0 +1,86 @@
+name: pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    name: quality + red-team gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout orchestrator
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Checkout eval-quality-gate (private)
+        uses: actions/checkout@v4
+        with:
+          repository: David899b/eval-quality-gate
+          path: eval-quality-gate
+          token: ${{ secrets.CROSS_REPO_TOKEN }}
+
+      - name: Checkout eval-redteam-suite (private)
+        uses: actions/checkout@v4
+        with:
+          repository: David899b/eval-redteam-suite
+          path: eval-redteam-suite
+          token: ${{ secrets.CROSS_REPO_TOKEN }}
+
+      - name: Install gates
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ./eval-quality-gate -e ./eval-redteam-suite
+
+      - name: Gate 1 - quality (expected REVIEW -> exit 0)
+        run: |
+          set +e
+          python -m eval_quality_gate \
+            --golden eval-quality-gate/data/golden_set.json \
+            --outputs eval-quality-gate/data/outputs.json \
+            --pricing eval-quality-gate/data/pricing.json \
+            --report-dir reports/quality
+          code=$?
+          echo "quality gate exit=$code (expected 0)"
+          test "$code" -eq 0
+
+      - name: Gate 2 - red-team (expected NO_GO -> exit 1)
+        run: |
+          set +e
+          python -m eval_redteam_suite \
+            --attacks eval-redteam-suite/data/attacks.json \
+            --targets eval-redteam-suite/data/target_outputs.json \
+            --report-dir reports/redteam
+          code=$?
+          echo "red-team gate exit=$code (expected 1)"
+          test "$code" -eq 1
+
+      - name: Roll-up summary
+        if: always()
+        run: python scripts/summarize.py || true
+
+      - name: Publish summary to job page
+        if: always()
+        run: |
+          if [ -f pipeline-summary.md ]; then
+            cat pipeline-summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload combined evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-evidence
+          path: |
+            reports/
+            pipeline-summary.md
+            pipeline-summary.json
+          if-no-files-found: warn
