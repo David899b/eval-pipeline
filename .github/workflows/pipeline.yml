@@ -1,76 +1,98 @@
-# eval-pipeline
+name: pipeline
 
-**One CI pipeline that chains two independent evaluation gates into a single release decision.**
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
 
-[![pipeline](https://github.com/David899b/eval-pipeline/actions/workflows/pipeline.yml/badge.svg)](https://github.com/David899b/eval-pipeline/actions/workflows/pipeline.yml)
-[![python 3.12](https://img.shields.io/badge/python-3.12-blue)](scripts/summarize.py)
-[![license: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+permissions:
+  contents: read
 
-A release decision should be backed by **both** the
-quality/safety/cost/latency/governance signal **and** the adversarial
-(red-team) ASR signal. This repo runs both gates in sequence, asserts their
-exit codes, and produces a single roll-up — so a reviewer sees one verdict,
-not two dashboards.
+jobs:
+  selftest:
+    name: orchestrator self-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-```
-                ┌───────────────────────────┐
-                │        eval-pipeline       │
-                │      (this repository)     │
-                └──────────────┬────────────┘
-                               │ checkout (public)
-          ┌────────────────────┴────────────────────┐
-          ▼                                          ▼
-┌───────────────────────┐                 ┌────────────────────────┐
-│  eval-quality-gate    │                 │   eval-redteam-suite    │
-│  5 dimensions + band  │                 │  OWASP LLM Top 10 ASR   │
-│  demo -> REVIEW       │                 │  demo -> NO_GO          │
-└──────────┬────────────┘                 └───────────┬────────────┘
-           │ report.json                              │ report.json
-           └──────────────────┬───────────────────────┘
-                              ▼
-                   scripts/summarize.py
-                   pipeline-summary.{md,json}
-```
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-## What it does
+      - name: Self-test (stdlib)
+        run: python scripts/run_stdlib_checks.py
 
-1. Checks out both gate repositories (both public).
-2. Installs both gates (`pip install -e`).
-3. Runs **Gate 1 — quality**: expects `REVIEW` (exit `0`).
-4. Runs **Gate 2 — red-team**: the sample target is intentionally vulnerable, so
-   the gate returns `NO_GO` (exit `1`); the step asserts exactly that exit code,
-   proving the gate blocks the merge as designed.
-5. Builds a combined `pipeline-summary.md` + `.json`, prints it to the job page,
-   and uploads all evidence as an artifact.
+  gates:
+    name: quality + red-team gates
+    needs: selftest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout orchestrator
+        uses: actions/checkout@v4
 
-## Run the roll-up locally
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-The orchestrator is stdlib only and reads the gates' JSON reports from
-`reports/`. With the checked-in fixtures:
+      - name: Checkout eval-quality-gate
+        uses: actions/checkout@v4
+        with:
+          repository: David899b/eval-quality-gate
+          path: eval-quality-gate
 
-```bash
-python scripts/run_stdlib_checks.py   # self-test, no external deps
-python scripts/summarize.py           # writes pipeline-summary.{md,json}
-```
+      - name: Checkout eval-redteam-suite
+        uses: actions/checkout@v4
+        with:
+          repository: David899b/eval-redteam-suite
+          path: eval-redteam-suite
 
-## CI behaviour
+      - name: Install gates
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ./eval-quality-gate -e ./eval-redteam-suite
 
-- **`selftest`** runs on every push/PR/dispatch: exercises `scripts/summarize.py`
-  against the checked-in fixtures (stdlib only).
-- **`gates`** runs after the self-test: checks out both (public) gate repos,
-  installs them, runs Gate 1 (expects `REVIEW` → exit `0`) and Gate 2 (expects
-  `NO_GO` → exit `1`), then rolls up the evidence.
+      - name: Gate 1 - quality (expected REVIEW -> exit 0)
+        run: |
+          set +e
+          python -m eval_quality_gate \
+            --golden eval-quality-gate/data/golden_set.json \
+            --outputs eval-quality-gate/data/outputs.json \
+            --pricing eval-quality-gate/data/pricing.json \
+            --report-dir reports/quality
+          code=$?
+          echo "quality gate exit=$code (expected 0)"
+          test "$code" -eq 0
 
-## Evidence produced
+      - name: Gate 2 - red-team (expected NO_GO -> exit 1)
+        run: |
+          set +e
+          python -m eval_redteam_suite \
+            --attacks eval-redteam-suite/data/attacks.json \
+            --targets eval-redteam-suite/data/target_outputs.json \
+            --report-dir reports/redteam
+          code=$?
+          echo "red-team gate exit=$code (expected 1)"
+          test "$code" -eq 1
 
-- `reports/quality/report.{md,json}` — 5-dimension decision + confidence band.
-- `reports/redteam/report.{md,json}` — ASR by OWASP category + breaches.
-- `pipeline-summary.{md,json}` — the roll-up.
+      - name: Roll-up summary
+        if: always()
+        run: python scripts/summarize.py || true
 
-See `guion-pipeline.md` for the narration, the numbers behind each figure, and
-the open decisions.
+      - name: Publish summary to job page
+        if: always()
+        run: |
+          if [ -f pipeline-summary.md ]; then
+            cat pipeline-summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
 
-## Companion repositories
-
-- [`eval-quality-gate`](https://github.com/David899b/eval-quality-gate) — quality / safety / cost / latency / governance gate.
-- [`eval-redteam-suite`](https://github.com/David899b/eval-redteam-suite) — OWASP-aligned red-team ASR gate.
+      - name: Upload combined evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-evidence
+          path: |
+            reports/
+            pipeline-summary.md
+            pipeline-summary.json
+          if-no-files-found: warn
