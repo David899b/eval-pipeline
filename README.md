@@ -3,7 +3,7 @@
 **One CI pipeline that runs two independent evaluation gates in sequence and produces a single roll-up, so a release decision is backed by both the quality/safety/cost/latency/governance signal and the adversarial (red-team) ASR signal.**
 
 [![pipeline](https://github.com/David899b/eval-pipeline/actions/workflows/pipeline.yml/badge.svg)](https://github.com/David899b/eval-pipeline/actions/workflows/pipeline.yml)
-[![python 3.12](https://img.shields.io/badge/python-3.12-blue)](pyproject.toml)
+[![python 3.12](https://img.shields.io/badge/python-3.12-blue)](https://github.com/David899b/eval-pipeline/blob/main/.github/workflows/pipeline.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 ```
