@@ -10,8 +10,29 @@ permissions:
   contents: read
 
 jobs:
+  selftest:
+    name: orchestrator self-test
+    runs-on: ubuntu-latest
+    outputs:
+      has_token: ${{ steps.detect.outputs.has_token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Detect cross-repo token
+        id: detect
+        run: echo "has_token=${{ secrets.CROSS_REPO_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+
+      - name: Self-test (stdlib)
+        run: python scripts/run_stdlib_checks.py
+
   gates:
     name: quality + red-team gates
+    needs: selftest
+    if: needs.selftest.outputs.has_token == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout orchestrator

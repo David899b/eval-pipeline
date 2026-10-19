@@ -57,6 +57,14 @@ exist under `reports/`:
 python scripts/summarize.py
 ```
 
+## CI behaviour
+
+- **`selftest` job** always runs: it exercises `scripts/summarize.py` against the
+  checked-in fixtures (stdlib only), so the orchestrator is verified even before
+  the token exists.
+- **`gates` job** runs only when `CROSS_REPO_TOKEN` is set; until then it is
+  skipped and the workflow stays green.
+
 ## Evidence produced
 
 - `reports/quality/report.{md,json}` — 5-dimension decision + confidence band.
