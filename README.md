@@ -48,7 +48,25 @@ two private gate repositories:
 Then add it under *Settings → Secrets and variables → Actions → New repository
 secret* named exactly `CROSS_REPO_TOKEN`.
 
-## Run locally
+## Troubleshooting the token
+
+The `gates` job runs a **Token preflight** step first. If the checkout of a
+private repo fails, read that step:
+
+- `Bad credentials (401)` — the secret value is not a valid token (wrong paste
+  or truncated).
+- `Not Found (get-a-repository)` — the token authenticates but **cannot see the
+  repo**. Almost always one of:
+  - the token was created under a **different account** than `David899b`
+    (resource owner must be `David899b`);
+  - it is a fine-grained token and the two repos are **not in its allowed
+    repository list**;
+  - it lacks **Contents: Read-only**.
+- Fix: regenerate the PAT under the `David899b` account with **Contents:
+  Read-only** on `eval-quality-gate` and `eval-redteam-suite`, then update the
+  `CROSS_REPO_TOKEN` secret.
+
+## Setup (one time)
 
 The orchestrator is stdlib only and expects the gates' JSON reports to already
 exist under `reports/`:

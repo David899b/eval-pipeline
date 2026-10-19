@@ -42,6 +42,14 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Token preflight (diagnostics)
+        run: |
+          set +e
+          echo "token account: $(GH_TOKEN='${{ secrets.CROSS_REPO_TOKEN }}' gh api user -q .login 2>&1)"
+          for r in eval-quality-gate eval-redteam-suite; do
+            echo "access David899b/$r: $(GH_TOKEN='${{ secrets.CROSS_REPO_TOKEN }}' gh api repos/David899b/$r -q .full_name 2>&1)"
+          done
+
       - name: Checkout eval-quality-gate (private)
         uses: actions/checkout@v4
         with:
