@@ -42,13 +42,23 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Token preflight (diagnostics)
+      - name: Token preflight (access check)
         run: |
           set +e
           echo "token account: $(GH_TOKEN='${{ secrets.CROSS_REPO_TOKEN }}' gh api user -q .login 2>&1)"
+          ok=true
           for r in eval-quality-gate eval-redteam-suite; do
-            echo "access David899b/$r: $(GH_TOKEN='${{ secrets.CROSS_REPO_TOKEN }}' gh api repos/David899b/$r -q .full_name 2>&1)"
+            if GH_TOKEN='${{ secrets.CROSS_REPO_TOKEN }}' gh api "repos/David899b/$r" -q .full_name >/dev/null 2>&1; then
+              echo "access David899b/$r: ok"
+            else
+              ok=false
+              echo "access David899b/$r: NOT ACCESSIBLE"
+            fi
           done
+          if [ "$ok" != "true" ]; then
+            echo "::error title=CROSS_REPO_TOKEN lacks repo access::Add both repos under 'Repository access' and grant Contents: Read-only, then update the secret."
+            exit 1
+          fi
 
       - name: Checkout eval-quality-gate (private)
         uses: actions/checkout@v4
